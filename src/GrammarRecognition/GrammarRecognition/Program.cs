@@ -35,13 +35,14 @@ namespace GrammarRecognition
         public class Automata
         {
             public char[] Alphabet { get; set; }
-            public string InitialNode { get; set; }
+            public List<string> InitialNode { get; set; }
             public List<string> States { get; set; }
             public List<Tuple<string, char, string>> Transitions { get; set; }
             public List<string> FinalNodes { get; set; }
 
             public Automata()
             {
+                InitialNode = new List<string>();
                 States = new List<string>();
                 Transitions = new List<Tuple<string, char, string>>();
                 FinalNodes = new List<string>();
