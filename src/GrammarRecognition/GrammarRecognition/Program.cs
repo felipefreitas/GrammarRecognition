@@ -10,6 +10,10 @@ namespace GrammarRecognition
 {
     public class Program
     {
+        public static List<string> MarkedStates = new List<string>();
+        public static List<string> FinalLambdaStates = new List<string>();
+        public static List<Tuple<string, char, string>> Transitions = new List<Tuple<string, char, string>>();
+
         public static void Main(string[] args)
         {
             if (args.Count() == 0)
@@ -30,8 +34,62 @@ namespace GrammarRecognition
             }
 
             var automata = GrammarParser(grammar);
+            var dfa = NfaToDfaConverter(automata);
+
+            string word = "";
+            while (word != "\u0004")
+            {
+                word = Console.ReadLine();
+
+                var result = Recognize(dfa, word);
+
+                if (result)
+                {
+                    Console.WriteLine("Sim");
+                }
+                else
+                {
+                    Console.WriteLine("Não");
+                }
+            }
+
+            Environment.Exit(0);
             #endregion
 
+        }
+
+        private static bool Recognize(DeterministicAutomata dfa, string word)
+        {
+            var currentState = dfa.InitialNode;
+
+            if (word == "#")
+            {
+                if (dfa.FinalNodes.Contains(currentState))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+
+            foreach (var input in word)
+            {
+                var reached = dfa.Transitions.Where(x => x.Item1 == currentState && x.Item2 == input).Select(x => { return x.Item3; }).FirstOrDefault();
+
+                if (reached == null)
+                {
+                    return false;
+                }
+
+                currentState = reached;
+            }
+
+            if (dfa.FinalNodes.Contains(currentState))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         public class Automata
@@ -45,6 +103,23 @@ namespace GrammarRecognition
             public Automata()
             {
                 InitialNode = new List<string>();
+                States = new List<string>();
+                Transitions = new List<Tuple<string, char, string>>();
+                FinalNodes = new List<string>();
+                Alphabet = new List<char>();
+            }
+        }
+
+        public class DeterministicAutomata
+        {
+            public List<char> Alphabet { get; set; }
+            public string InitialNode { get; set; }
+            public List<string> States { get; set; }
+            public List<Tuple<string, char, string>> Transitions { get; set; }
+            public List<string> FinalNodes { get; set; }
+
+            public DeterministicAutomata()
+            {
                 States = new List<string>();
                 Transitions = new List<Tuple<string, char, string>>();
                 FinalNodes = new List<string>();
@@ -135,7 +210,7 @@ namespace GrammarRecognition
                         }
                     case ENextSteps.ReadTransitions:
                         {
-                            if (char.IsLetterOrDigit(c) && (cNext == '-' || cNext == ',' || cNext == '}'))
+                            if ((char.IsLetterOrDigit(c) || c == '#') && (cNext == '-' || cNext == ',' || cNext == '}'))
                             {
                                 processed = processed + c;
                             }
@@ -147,10 +222,14 @@ namespace GrammarRecognition
                             {
                                 processed = processed + '|';
                             }
+                            if (c == '#')
+                            {
+                                processed = processed + "|#";
+                            }
                             if (processed.Split('|').Length == 3 && processed.Split('|')[2] != "")
                             {
                                 var itens = processed.Split('|');
-                                if (automata.States.Contains(itens[0]) && automata.States.Contains(itens[2]) || automata.Alphabet.Contains(itens[2][0]) || itens[2][0] == 'λ')
+                                if (automata.States.Contains(itens[0]) && automata.States.Contains(itens[2]) || automata.Alphabet.Contains(itens[2][0]) || itens[2][0] == '#')
                                 {
                                     automata.Transitions.Add(new Tuple<string, char, string>(itens[0], itens[1].ToCharArray()[0], itens[2]));
                                     processed = "";
@@ -175,11 +254,12 @@ namespace GrammarRecognition
                         }
                     case ENextSteps.NormalizeTransitions:
                         {
-                            var toNormalize = automata.Transitions.Where(x => automata.Alphabet.Contains(x.Item3[0]) || x.Item3[0] == 'λ');
+                            var toNormalize = automata.Transitions.Where(x => automata.Alphabet.Contains(x.Item3[0]) || x.Item3[0] =='#');
                             if (toNormalize.Count() > 0)
                             {
                                 var normalized = new List<Tuple<string, char, string>>();
                                 automata.Transitions = automata.Transitions.Except(toNormalize).ToList();
+                                FinalLambdaStates = toNormalize.Where(x => x.Item2 == '#' && x.Item3 == "#").Select(x => { return x.Item1.ToString(); } ).ToList();
                                 var generate = true;
                                 var state = GenerateState();
 
@@ -217,6 +297,74 @@ namespace GrammarRecognition
             int num = _random.Next(0, 26);
             char let = (char)('a' + num);
             return char.ToUpper(let);
+        }
+
+        public static DeterministicAutomata NfaToDfaConverter(Automata nfa)
+        {
+            var transitions = new List<Tuple<List<string>, char, List<string>>>();
+            var lambdaStates = new List<List<string>>();
+
+            foreach (var state in nfa.States)
+            {
+                var achieved = LambdaDepth(state, nfa.Transitions);
+                lambdaStates.Add(achieved);
+            }
+
+            var stateBegin = lambdaStates.Where(x => x.Intersect(nfa.InitialNode).Any()).FirstOrDefault();
+
+            ReadState(string.Join("", stateBegin.ToArray()), nfa.Alphabet, nfa.Transitions);
+
+            var dfa = new DeterministicAutomata();
+            dfa.Alphabet = nfa.Alphabet;
+            dfa.FinalNodes = Transitions.Where(x => x.Item1.Any(y => nfa.FinalNodes.Contains(y.ToString()))).Select(x => x.Item1).Distinct().Union(FinalLambdaStates).ToList();
+            dfa.InitialNode = string.Join("", stateBegin.ToArray());
+            dfa.States = Transitions.Where(x => !string.IsNullOrWhiteSpace(x.Item3)).Select(x => { return x.Item1; }).Union(Transitions.Where(x => !string.IsNullOrWhiteSpace(x.Item3)).Select(x => { return x.Item3; })).Distinct().ToList();
+            dfa.Transitions = Transitions;
+
+            return dfa;
+        }
+
+        public static List<string> LambdaDepth(string state, List<Tuple<string,char,string>> transitions)
+        {
+            var achieved = transitions
+                .Where(x => x.Item1 == state && x.Item2 == '#')
+                .Select(x => { return x.Item3; }).ToList();
+
+            achieved.Add(state);
+
+            return achieved;
+        }
+
+        public static string ReachStates(string states, char simbol, List<Tuple<string, char, string>> transitions)
+        {
+            var achieved = new List<string>();
+            foreach (var state in states)
+            {
+                var reach = transitions.Where(x => x.Item1 == state.ToString() && x.Item2 == simbol);
+                foreach (var item in reach)
+                {
+                    achieved.Add(item.Item3);
+                }
+            }
+
+            return string.Join("", achieved.ToArray());
+        }
+
+        public static void ReadState(string state, List<char> simbols, List<Tuple<string, char, string>> transitions)
+        {
+            if (!MarkedStates.Contains(state) && state != null)
+            {
+                MarkedStates.Add(state);
+                foreach (var simbol in simbols)
+                {
+                    var reached = ReachStates(state, simbol, transitions);
+                    Transitions.Add(new Tuple<string, char, string>(state, simbol, reached));
+                    if (!string.IsNullOrWhiteSpace(reached))
+                    {
+                        ReadState(reached, simbols, transitions);
+                    }
+                }
+            }
         }
     }
 }
